@@ -2,49 +2,67 @@
 Configuration settings for the document processing system.
 """
 
+import os
+import json
+
+# Get environment variables
+PROJECT_ID = os.environ.get("PROJECT_ID", "your-project")
+REGION = os.environ.get("REGION", "us-central1")
+BUCKET_NAME = os.environ.get("BUCKET_NAME", "your-document-bucket")
+
+# Get sectors from environment variable
+SECTORS_ENV = os.environ.get(
+    "SECTORS", "accounting hr legal engineering sales marketing"
+)
+# Handle both comma-separated and space-separated formats
+if "," in SECTORS_ENV:
+    SECTORS = [sector.strip() for sector in SECTORS_ENV.split(",")]
+else:
+    SECTORS = [sector.strip() for sector in SECTORS_ENV.split()]
+
 # Mapping of sectors to Vector Search indexes
 SECTOR_INDEX_MAPPING = {
-    "accounting": "projects/your-project/locations/us-central1/indexes/accounting-index",
-    "hr": "projects/your-project/locations/us-central1/indexes/hr-index",
-    "legal": "projects/your-project/locations/us-central1/indexes/legal-index",
-    "engineering": "projects/your-project/locations/us-central1/indexes/engineering-index",
-    "sales": "projects/your-project/locations/us-central1/indexes/sales-index",
-    "marketing": "projects/your-project/locations/us-central1/indexes/marketing-index",
+    sector: f"projects/{PROJECT_ID}/locations/{REGION}/indexes/{sector}-index"
+    for sector in SECTORS
 }
 
 # Default processing options for each strategy
 DEFAULT_PROCESSING_OPTIONS = {
     "fixed_size": {
-        "chunk_size": 512,
+        "chunk_size": int(os.environ.get("FIXED_SIZE_CHUNK_SIZE", "512")),
     },
     "semantic": {
-        "min_chunk_size": 100,
-        "max_chunk_size": 1000,
+        "min_chunk_size": int(os.environ.get("SEMANTIC_MIN_CHUNK_SIZE", "100")),
+        "max_chunk_size": int(os.environ.get("SEMANTIC_MAX_CHUNK_SIZE", "1000")),
     },
     "sliding_window": {
-        "chunk_size": 512,
-        "overlap": 128,
+        "chunk_size": int(os.environ.get("SLIDING_WINDOW_CHUNK_SIZE", "512")),
+        "overlap": int(os.environ.get("SLIDING_WINDOW_OVERLAP", "128")),
     },
     "hierarchical": {
-        "levels": ["document", "paragraph"],
+        "levels": json.loads(
+            os.environ.get("HIERARCHICAL_LEVELS", '["document", "paragraph"]')
+        ),
     },
 }
 
 # Embedding model settings
 EMBEDDING_MODEL = {
-    "endpoint_id": "text-embedding-endpoint",
-    "location": "us-central1",
-    "dimensions": 768,  # Adjust based on the model used
+    "model_name": os.environ.get(
+        "EMBEDDING_MODEL_NAME", "text-multilingual-embedding-002"
+    ),
+    "dimensions": int(os.environ.get("EMBEDDING_DIMENSIONS", "768")),
 }
 
 # Firestore collection structure
 FIRESTORE_STRUCTURE = {
-    "sectors_collection": "sectors",
-    "documents_collection": "documents",
-    "chunks_collection": "chunks",
+    "sectors_collection": os.environ.get("SECTORS_COLLECTION", "sectors"),
+    "documents_collection": os.environ.get("DOCUMENTS_COLLECTION", "documents"),
+    "chunks_collection": os.environ.get("CHUNKS_COLLECTION", "chunks"),
 }
 
 # Cloud Storage settings
 STORAGE_SETTINGS = {
-    "temp_directory": "/tmp",
+    "temp_directory": os.environ.get("TEMP_DIRECTORY", "/tmp"),
+    "bucket_name": BUCKET_NAME,
 }

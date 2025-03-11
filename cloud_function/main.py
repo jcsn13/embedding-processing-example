@@ -10,7 +10,7 @@ from text_processing import extract_text_from_document
 from chunking import chunk_text
 from embeddings import generate_embeddings
 from database import store_embeddings_in_vector_search, store_chunks_in_firestore
-from config import SECTOR_INDEX_MAPPING
+from config import SECTOR_INDEX_MAPPING, BUCKET_NAME
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -102,17 +102,69 @@ def process_document(request):
 
         # 1. Download document from Cloud Storage
         bucket_name, object_name = parse_gcs_uri(blob_path)
+        logger.info(f"Using configured bucket: {bucket_name} for object: {object_name}")
+
         bucket = storage_client.bucket(bucket_name)
         blob = bucket.blob(object_name)
 
         # Create a temporary file to store the document
         temp_file_path = f"/tmp/{document_id}"
-        blob.download_to_filename(temp_file_path)
-        logger.info(f"Downloaded document to {temp_file_path}")
+        try:
+            blob.download_to_filename(temp_file_path)
+            logger.info(f"Downloaded document to {temp_file_path}")
+        except Exception as download_error:
+            error_message = str(download_error)
+            logger.error(f"Error downloading file: {error_message}")
+
+            # Provide more helpful error message
+            if "403" in error_message:
+                return (
+                    json.dumps(
+                        {
+                            "success": False,
+                            "error": f"Access denied to bucket '{bucket_name}'. Please check project billing status and service account permissions.",
+                            "details": error_message,
+                        }
+                    ),
+                    403,
+                    headers,
+                )
+            elif "404" in error_message or "Not Found" in error_message:
+                return (
+                    json.dumps(
+                        {
+                            "success": False,
+                            "error": f"File not found: '{object_name}' in bucket '{bucket_name}'. Please check that the file exists at this path.",
+                            "details": error_message,
+                            "suggestion": "If you uploaded the file to a different path, make sure the blob_path parameter matches the actual file location.",
+                        }
+                    ),
+                    404,
+                    headers,
+                )
+            else:
+                # Re-raise for general error handling
+                raise
 
         # 2. Extract text from document
-        text = extract_text_from_document(temp_file_path)
-        logger.info(f"Extracted {len(text)} characters of text")
+        try:
+            text = extract_text_from_document(temp_file_path)
+            logger.info(f"Extracted {len(text)} characters of text")
+        except Exception as text_error:
+            error_message = str(text_error)
+            logger.error(f"Error extracting text from document: {error_message}")
+            return (
+                json.dumps(
+                    {
+                        "success": False,
+                        "error": "Failed to extract text from the document",
+                        "details": error_message,
+                        "suggestion": "The file may be corrupted, password-protected, or in an unsupported format.",
+                    }
+                ),
+                400,
+                headers,
+            )
 
         # 3. Chunk text based on strategy
         chunks = chunk_text(text, processing_strategy, processing_options)
@@ -165,37 +217,88 @@ def process_document(request):
         )
 
     except Exception as e:
-        logger.error(f"Error processing document: {str(e)}")
+        error_message = str(e)
+        logger.error(f"Error processing document: {error_message}")
         logger.error(traceback.format_exc())
 
+        # Determine if this is a known error type
+        if (
+            "billing account" in error_message.lower()
+            and "disabled" in error_message.lower()
+        ):
+            status_code = 403
+            error_response = {
+                "success": False,
+                "error": "The Google Cloud project's billing account is disabled. Please enable billing for the project to access storage resources.",
+                "details": error_message,
+            }
+        elif "storage.googleapis.com" in error_message and "403" in error_message:
+            status_code = 403
+            error_response = {
+                "success": False,
+                "error": f"Access denied to Google Cloud Storage bucket '{BUCKET_NAME}'. Please check project billing status and service account permissions.",
+                "details": error_message,
+            }
+        elif "404" in error_message or "Not Found" in error_message:
+            status_code = 404
+            error_response = {
+                "success": False,
+                "error": "File not found in storage bucket. Please check that the file exists at the specified path.",
+                "details": error_message,
+                "suggestion": "If you uploaded the file to a different path, make sure the blob_path parameter matches the actual file location.",
+            }
+        else:
+            status_code = 500
+            error_response = {
+                "success": False,
+                "error": "An error occurred while processing the document",
+                "details": error_message,
+            }
+
         return (
-            json.dumps({"success": False, "error": str(e)}),
-            500,
+            json.dumps(error_response),
+            status_code,
             headers,
         )
 
 
 def parse_gcs_uri(blob_path):
     """
-    Parse a GCS blob path into bucket name and object name.
+    Parse a GCS blob path to extract the object name while preserving directory structure.
+    Always uses the configured bucket name from environment variables.
 
     Args:
         blob_path (str): The GCS blob path (can be with or without gs:// prefix)
 
     Returns:
-        tuple: (bucket_name, object_name)
+        tuple: (bucket_name, object_name) where bucket_name is always the configured BUCKET_NAME
     """
     # If the path starts with gs://, remove it
     if blob_path.startswith("gs://"):
         blob_path = blob_path[5:]
 
-    # Split the path into bucket and object
-    parts = blob_path.split("/", 1)
+    # Extract the object name while preserving directory structure
+    if "/" in blob_path:
+        # First, split to separate bucket name from the rest
+        parts = blob_path.split("/", 1)
 
-    if len(parts) < 2:
-        raise ValueError(f"Invalid GCS path: {blob_path}")
+        # Check if the first part is a sector name (like "accounting")
+        # If it is, we want to preserve it as part of the object path
+        first_part = parts[0]
+        rest_of_path = parts[1] if len(parts) > 1 else ""
 
-    bucket_name = parts[0]
-    object_name = parts[1]
+        # If the first part is a sector name and there's more to the path,
+        # include it in the object name to preserve the directory structure
+        if first_part in SECTOR_INDEX_MAPPING.keys():
+            object_name = f"{first_part}/{rest_of_path}"
+        else:
+            # If it's not a recognized sector, just use the rest of the path
+            object_name = rest_of_path
+    else:
+        # If there's no slash, assume the entire path is the object name
+        object_name = blob_path
 
-    return bucket_name, object_name
+    logger.info(f"Original blob_path: {blob_path}, Parsed object_name: {object_name}")
+
+    # Always return the configured bucket name, not the one from the path
+    return BUCKET_NAME, object_name

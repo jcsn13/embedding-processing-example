@@ -6,7 +6,9 @@ import json
 import uuid
 from google.cloud import storage
 
-# Configuration
+# Configuration from environment variables
+PROJECT_ID = os.environ.get("PROJECT_ID", "your-project")
+REGION = os.environ.get("REGION", "us-central1")
 CLOUD_FUNCTION_URL = os.environ.get(
     "CLOUD_FUNCTION_URL",
     "https://your-region-your-project.cloudfunctions.net/process_document",
@@ -16,8 +18,15 @@ BUCKET_NAME = os.environ.get("BUCKET_NAME", "your-document-bucket")
 # Initialize GCP clients
 storage_client = storage.Client()
 
-# Available sectors
-SECTORS = ["accounting", "hr", "legal", "engineering", "sales", "marketing"]
+# Available sectors from environment variable
+SECTORS_ENV = os.environ.get(
+    "SECTORS", "accounting hr legal engineering sales marketing"
+)
+# Handle both comma-separated and space-separated formats
+if "," in SECTORS_ENV:
+    SECTORS = [sector.strip() for sector in SECTORS_ENV.split(",")]
+else:
+    SECTORS = [sector.strip() for sector in SECTORS_ENV.split()]
 
 # Available processing strategies
 PROCESSING_STRATEGIES = {

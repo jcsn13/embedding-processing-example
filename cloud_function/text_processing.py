@@ -19,6 +19,12 @@ def extract_text_from_document(file_path: str) -> str:
         str: Extracted text
     """
     file_extension = os.path.splitext(file_path)[1].lower()
+    logger.info(f"Detected file extension: '{file_extension}' for file: {file_path}")
+
+    # If no extension is detected, try to determine file type
+    if not file_extension:
+        file_extension = detect_file_type(file_path)
+        logger.info(f"Detected file type: '{file_extension}' using content analysis")
 
     try:
         # Use unstructured for document processing
@@ -45,6 +51,42 @@ def extract_text_from_document(file_path: str) -> str:
         return fallback_extract_text(file_path)
 
 
+def detect_file_type(file_path: str) -> str:
+    """
+    Detect file type based on content when extension is missing.
+
+    Args:
+        file_path (str): Path to the file
+
+    Returns:
+        str: Detected file extension including the dot (e.g., '.pdf')
+    """
+    try:
+        # Read the first few bytes to check for file signatures
+        with open(file_path, "rb") as f:
+            header = f.read(8)
+
+        # Check for PDF signature (%PDF-)
+        if header.startswith(b"%PDF-"):
+            logger.info(f"File signature indicates PDF format")
+            return ".pdf"
+
+        # Check for DOCX (ZIP format with specific content)
+        if header.startswith(b"PK\x03\x04"):
+            logger.info(f"File signature indicates ZIP format (possibly DOCX)")
+            return ".docx"
+
+        # Default to PDF as a fallback for most document processing
+        logger.warning(
+            f"Could not determine file type from signature, defaulting to PDF"
+        )
+        return ".pdf"
+    except Exception as e:
+        logger.error(f"Error detecting file type: {str(e)}")
+        # Default to PDF as a fallback
+        return ".pdf"
+
+
 def fallback_extract_text(file_path: str) -> str:
     """
     Fallback method to extract text using specific libraries for each file type.
@@ -57,6 +99,11 @@ def fallback_extract_text(file_path: str) -> str:
     """
     file_extension = os.path.splitext(file_path)[1].lower()
 
+    # If no extension is detected, try to determine file type
+    if not file_extension:
+        file_extension = detect_file_type(file_path)
+        logger.info(f"Using detected file type: '{file_extension}' for extraction")
+
     if file_extension == ".pdf":
         return extract_text_from_pdf(file_path)
     elif file_extension == ".docx":
@@ -64,7 +111,23 @@ def fallback_extract_text(file_path: str) -> str:
     elif file_extension == ".txt":
         return extract_text_from_txt(file_path)
     else:
-        raise ValueError(f"Unsupported file type: {file_extension}")
+        # For unknown file types, try PDF extraction as a fallback
+        logger.warning(
+            f"Unsupported file type: {file_extension}, attempting PDF extraction as fallback"
+        )
+        try:
+            return extract_text_from_pdf(file_path)
+        except Exception as pdf_error:
+            logger.error(f"PDF extraction failed: {str(pdf_error)}")
+            # As a last resort, try to read as plain text
+            try:
+                logger.warning("Attempting to read file as plain text")
+                return extract_text_from_txt(file_path)
+            except Exception as txt_error:
+                logger.error(f"Plain text extraction failed: {str(txt_error)}")
+                raise ValueError(
+                    f"Could not extract text from file with extension: {file_extension}"
+                )
 
 
 def extract_text_from_pdf(file_path: str) -> str:

@@ -117,7 +117,32 @@ document_processing/
 3. Run locally: `streamlit run app.py`
 4. For production, deploy to a service like Google App Engine or Cloud Run
 
-### Cloud Function Deployment
+### Deployment
+
+#### Automated Deployment
+
+The project includes a deployment script that automates the deployment of both the Cloud Function and the Streamlit app to Google Cloud Platform:
+
+1. Make the script executable:
+   ```
+   chmod +x deploy.sh
+   ```
+
+2. Run the deployment script:
+   ```
+   ./deploy.sh
+   ```
+
+The script will:
+- Deploy the Cloud Function
+- Deploy the Streamlit app to Cloud Run
+- Create Vector Search indexes for each sector
+- Update the configuration with the correct project-specific values
+- Set up all necessary environment variables
+
+#### Manual Deployment
+
+##### Cloud Function Deployment
 
 1. Navigate to the `cloud_function` directory
 2. Deploy using gcloud CLI:
@@ -125,10 +150,27 @@ document_processing/
    gcloud functions deploy process_document \
      --runtime python39 \
      --trigger-http \
-     --allow-unauthenticated
+     --allow-unauthenticated \
+     --memory=2048MB \
+     --timeout=540s
    ```
 
-### Vector Search Index Setup
+##### Streamlit App Deployment to Cloud Run
+
+1. Navigate to the `streamlit_app` directory
+2. Build and deploy using gcloud CLI:
+   ```
+   gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/document-processing-app
+   gcloud run deploy document-processing-app \
+     --image gcr.io/YOUR_PROJECT_ID/document-processing-app \
+     --platform managed \
+     --region us-central1 \
+     --allow-unauthenticated \
+     --memory 2Gi \
+     --set-env-vars="CLOUD_FUNCTION_URL=YOUR_CLOUD_FUNCTION_URL,BUCKET_NAME=YOUR_BUCKET_NAME"
+   ```
+
+##### Vector Search Index Setup
 
 1. Create a Vector Search index for each company sector:
    ```
@@ -142,16 +184,48 @@ document_processing/
 
 ## Configuration
 
-The system uses a configuration file to map sectors to Vector Search indexes:
+### Environment Variables
+
+The project uses environment variables for configuration, which can be set in a `.env` file at the project root. An example file (`.env.example`) is provided as a template with detailed comments explaining each variable:
+
+```bash
+# Copy the example file to create your .env file
+cp .env.example .env
+# Edit the file with your specific configuration values
+```
+
+Key environment variables include:
+- `PROJECT_ID`: Your Google Cloud project ID
+- `REGION`: The Google Cloud region for your resources
+- `BUCKET_NAME`: The Cloud Storage bucket for documents
+- `SECTORS`: Space-separated list of business sectors (whitespace is automatically trimmed)
+- Various configuration options for chunking strategies
+
+The `.gitignore` file is configured to exclude the `.env` file from version control to prevent exposure of sensitive information.
+
+### Sector Configuration
+
+The system dynamically maps sectors (specified in the `SECTORS` environment variable) to Vector Search indexes:
 
 ```python
 SECTOR_INDEX_MAPPING = {
     "accounting": "projects/your-project/locations/us-central1/indexes/accounting-index",
     "hr": "projects/your-project/locations/us-central1/indexes/hr-index",
     "legal": "projects/your-project/locations/us-central1/indexes/legal-index",
-    # Add more sectors as needed
+    # Dynamically created for each sector in the SECTORS environment variable
 }
 ```
+
+### Terraform Configuration
+
+For infrastructure as code deployment, Terraform variables are automatically generated from environment variables:
+
+```bash
+# Deploy infrastructure using variables from .env
+make deploy
+```
+
+This automatically creates the necessary `terraform/terraform.tfvars` file using values from your `.env` file. The `terraform.tfvars` file is included in `.gitignore` to prevent committing sensitive configuration values to version control.
 
 ## Security Considerations
 

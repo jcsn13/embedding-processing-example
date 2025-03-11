@@ -9,7 +9,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize clients
-firestore_client = firestore.Client()
+# Use the "documents" database instead of the default database
+firestore_client = firestore.Client(database="documents")
 
 
 def store_embeddings_in_vector_search(
@@ -29,23 +30,65 @@ def store_embeddings_in_vector_search(
         f"Storing {len(chunk_embeddings)} embeddings in Vector Search index: {index_id}"
     )
 
-    # Get the index
-    index = aiplatform.MatchingEngineIndex(index_id)
+    try:
+        # List available indexes to check if the index exists
+        available_indexes = aiplatform.MatchingEngineIndex.list()
+        logger.info(f"Available indexes: {[idx.name for idx in available_indexes]}")
+
+        # Find the index by display name
+        sector_name = index_id.split("/")[-1].replace("-index", "")
+        logger.info(f"Looking for index with sector: {sector_name}")
+
+        matching_indexes = [
+            idx
+            for idx in available_indexes
+            if f"{sector_name}-index" in idx.display_name
+        ]
+
+        if matching_indexes:
+            # Use the first matching index
+            index = matching_indexes[0]
+            logger.info(
+                f"Found matching index: {index.name} with display name: {index.display_name}"
+            )
+        else:
+            # Fall back to using the provided index_id
+            logger.warning(
+                f"No matching index found for {sector_name}, using provided index_id"
+            )
+            index = aiplatform.MatchingEngineIndex(index_id)
+    except Exception as e:
+        logger.error(f"Error finding index: {str(e)}")
+        # Fall back to using the provided index_id
+        index = aiplatform.MatchingEngineIndex(index_id)
 
     # Prepare data for indexing
     vector_ids = []
-    embeddings = []
+    datapoints = []
 
     for chunk, embedding in chunk_embeddings:
         # Generate a unique ID for each vector
         vector_id = str(uuid.uuid4())
         vector_ids.append(vector_id)
-        embeddings.append(embedding)
 
-    # Index the embeddings
-    index.upsert_embeddings(embeddings=embeddings, ids=vector_ids)
+        # Format the embedding data according to the API format
+        embedding_data = {
+            "datapoint_id": vector_id,
+            "feature_vector": embedding,
+        }
+        datapoints.append(embedding_data)
 
-    logger.info(f"Successfully stored {len(vector_ids)} embeddings in Vector Search")
+    try:
+        # Index the embeddings using the upsert_datapoints method
+        logger.info(f"Upserting {len(datapoints)} datapoints to index")
+        index.upsert_datapoints(datapoints)
+        logger.info(
+            f"Successfully stored {len(vector_ids)} embeddings in Vector Search"
+        )
+    except Exception as e:
+        logger.error(f"Error upserting datapoints: {str(e)}")
+        raise
+
     return vector_ids
 
 

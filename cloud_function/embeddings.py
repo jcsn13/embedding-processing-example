@@ -3,7 +3,6 @@ from typing import List, Dict, Any, Tuple, Optional
 from google.cloud import aiplatform
 from google.cloud.aiplatform.gapic.schema import predict
 from vertexai.language_models import TextEmbeddingModel
-from vertexai.preview.language_models import TextEmbeddingInput, EmbedContentConfig
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
