@@ -121,19 +121,14 @@ document_processing/
 
 #### Automated Deployment
 
-The project includes a deployment script that automates the deployment of both the Cloud Function and the Streamlit app to Google Cloud Platform:
+The project includes a Makefile that automates the deployment of both the Cloud Function and the Streamlit app to Google Cloud Platform:
 
-1. Make the script executable:
-   ```
-   chmod +x deploy.sh
-   ```
+```bash
+# Deploy infrastructure using variables from .env
+make deploy
+```
 
-2. Run the deployment script:
-   ```
-   ./deploy.sh
-   ```
-
-The script will:
+This will:
 - Deploy the Cloud Function
 - Deploy the Streamlit app to Cloud Run
 - Create Vector Search indexes for each sector
